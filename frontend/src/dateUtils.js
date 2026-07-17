@@ -26,6 +26,15 @@ export const addDays = (d, n) => {
   return x;
 };
 
+export const addMonths = (d, n) => {
+  const x = new Date(d.getFullYear(), d.getMonth() + n, 1);
+  return x;
+};
+
+export const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+
+export const fmtMonth = (d) => d.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+
 export const isWeekend = (d) => d.getDay() === 0 || d.getDay() === 6;
 
 export const fmtShort = (d) =>

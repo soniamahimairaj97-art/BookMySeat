@@ -52,12 +52,21 @@ export const login = (email, password) =>
   api.post("/login", { email, password }).then((r) => r.data);
 
 // ---- Dashboard ----
+export const getMyDashboard = (view, date) =>
+  api.get("/dashboard/me", { params: { view, date } }).then((r) => r.data);
+
+export const getTeamDashboard = (view, date) =>
+  api.get("/dashboard/team", { params: { view, date } }).then((r) => r.data);
+
 export const getDashboard = (date) =>
   api.get("/dashboard", { params: { date } }).then((r) => r.data);
 
 // ---- Bookings ----
 export const bookStatus = (booking_date, status) =>
   api.post("/bookings", { booking_date, status }).then((r) => r.data);
+
+export const bulkBookStatus = (dates, status) =>
+  api.post("/bookings/bulk", { dates, status }).then((r) => r.data);
 
 export const getMyBookings = () => api.get("/bookings/me").then((r) => r.data);
 
