@@ -3,12 +3,15 @@
 Run with:  python -m app.seed
 """
 
+from datetime import date
+
 from app.auth import hash_password
 from app.database import Base, SessionLocal, engine
-from app.models import Employee, Team
+from app.models import Employee, FloorConfig, Team
 
 TEAM_COUNTS = {"PFG": 27, "Gear_Box": 20, "e_Motor": 23}
 DEFAULT_PASSWORD = "password123"
+GO_LIVE_CAPACITY = 63
 
 
 def run() -> None:
@@ -50,9 +53,27 @@ def run() -> None:
                 is_active=True,
             )
         )
+        db.add(
+            Employee(
+                name="Admin",
+                email="admin@bookmyseat.example.com",
+                team_id=teams["PFG"].id,
+                role="admin",
+                hashed_password=hash_password(DEFAULT_PASSWORD),
+                is_active=True,
+            )
+        )
+        db.add(
+            FloorConfig(
+                seat_count=GO_LIVE_CAPACITY,
+                effective_from=date.today(),
+                previous_count=None,
+                updated_by=None,
+            )
+        )
 
         db.commit()
-        total = sum(TEAM_COUNTS.values()) + 1
+        total = sum(TEAM_COUNTS.values()) + 2
         print(f"Seeded {len(teams)} teams and {total} employees (default password: {DEFAULT_PASSWORD}).")
     finally:
         db.close()

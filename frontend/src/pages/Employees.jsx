@@ -61,9 +61,9 @@ export default function Employees() {
               <span className="text-[11px] px-2 py-0.5 rounded-full hidden sm:inline" style={{ background: T.navySoft, color: T.inkSoft }}>
                 {team?.label ?? "—"}
               </span>
-              {e.role === "manager" && (
+              {(e.role === "manager" || e.role === "admin") && (
                 <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold" style={{ background: T.blueSoft, color: T.blue }}>
-                  Manager
+                  {e.role === "admin" ? "Admin" : "Manager"}
                 </span>
               )}
               <span

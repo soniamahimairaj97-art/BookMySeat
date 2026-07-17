@@ -34,7 +34,7 @@ def list_holidays(
 @router.post("/employees", response_model=EmployeeOut)
 def add_employee(
     req: EmployeeIn,
-    _manager: Employee = Depends(require_role("manager")),
+    _manager: Employee = Depends(require_role("admin", "manager")),
     db: Session = Depends(get_db),
 ):
     if not db.query(Team).filter_by(id=req.team_id, is_active=True).first():
@@ -59,7 +59,7 @@ def add_employee(
 @router.post("/holidays", response_model=HolidayOut)
 def add_holiday(
     req: HolidayIn,
-    manager: Employee = Depends(require_role("manager")),
+    manager: Employee = Depends(require_role("admin", "manager")),
     db: Session = Depends(get_db),
 ):
     if db.query(Holiday).filter_by(holiday_date=req.holiday_date).first():
@@ -75,7 +75,7 @@ def add_holiday(
 @router.delete("/holidays/{holiday_date}")
 def delete_holiday(
     holiday_date: date,
-    _manager: Employee = Depends(require_role("manager")),
+    _manager: Employee = Depends(require_role("admin", "manager")),
     db: Session = Depends(get_db),
 ):
     holiday = db.query(Holiday).filter_by(holiday_date=holiday_date).first()
@@ -90,7 +90,7 @@ def delete_holiday(
 def export_excel(
     start: date | None = Query(default=None),
     end: date | None = Query(default=None),
-    _manager: Employee = Depends(require_role("manager")),
+    _manager: Employee = Depends(require_role("admin", "manager")),
     db: Session = Depends(get_db),
 ):
     today = date.today()

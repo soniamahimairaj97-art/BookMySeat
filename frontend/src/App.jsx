@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "./AuthContext";
 import { useToast } from "./ToastContext";
-import { T, CAPACITY, icons } from "./theme";
+import { T, icons } from "./theme";
+import { getCapacityFor } from "./api";
+import { TODAY_KEY } from "./dateUtils";
 import Icon from "./components/Icon";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -10,32 +12,44 @@ import MyHistory from "./pages/MyHistory";
 import Employees from "./pages/Employees";
 import Admin from "./pages/Admin";
 
+const isCapacityManager = (role) => role === "manager" || role === "admin";
+
 export default function App() {
   const { session, logout } = useAuth();
   const showToast = useToast();
   const [page, setPage] = useState("dashboard");
+  const [capacity, setCapacity] = useState(null);
+
+  useEffect(() => {
+    if (!session) return;
+    getCapacityFor(TODAY_KEY)
+      .then((c) => setCapacity(c.seat_count))
+      .catch(() => {});
+  }, [session]);
 
   if (!session) return <Login />;
 
   const role = session.role;
+  const isManager = isCapacityManager(role);
 
   const nav = [
     { id: "dashboard", label: "Dashboard", icon: icons.dash },
     { id: "status", label: "My status", icon: icons.seat },
     { id: "history", label: "My history", icon: icons.history },
     { id: "employees", label: "Employees", icon: icons.people },
-    ...(role === "manager" ? [{ id: "admin", label: "Admin", icon: icons.admin }] : []),
+    ...(isManager ? [{ id: "admin", label: "Admin", icon: icons.admin }] : []),
   ];
 
+  const capacityLabel = capacity ?? "…";
   const titles = {
     dashboard: ["Dashboard — split view", "Team-wise WFO · WFH · Leave (A) · Absent counts, live"],
-    status: ["My status", `WFO / WFH / Leave (A) · ${CAPACITY} WFO slots · auto-assigned · Mon–Fri, 7-day window`],
+    status: ["My status", `WFO / WFH / Leave (A) · ${capacityLabel} WFO slots · auto-assigned · Mon–Fri, 7-day window`],
     history: ["My history", "Your daily categories and edit rules"],
     employees: ["Employees", "People on record"],
-    admin: ["Admin panel", "Add employees, edit approvals, holidays and split report — managers only"],
+    admin: ["Admin panel", "Add employees, edit approvals, holidays, seat capacity and split report — Admin/Manager only"],
   };
 
-  const activePage = page === "admin" && role !== "manager" ? "dashboard" : page;
+  const activePage = page === "admin" && !isManager ? "dashboard" : page;
 
   const handleLogout = () => {
     logout();
@@ -49,7 +63,7 @@ export default function App() {
           <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shrink-0" style={{ background: T.amber, color: "#3A2600", fontFamily: "'Space Grotesk', sans-serif" }}>B</div>
           <div className="hidden md:block">
             <div className="text-white text-sm font-semibold leading-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Book<span style={{ color: T.amber }}>My</span>Seat</div>
-            <div className="text-[10px]" style={{ color: "#8FA6BC" }}>{CAPACITY} WFO slots</div>
+            <div className="text-[10px]" style={{ color: "#8FA6BC" }}>{capacityLabel} WFO slots</div>
           </div>
         </div>
         {nav.map((n) => (
@@ -83,7 +97,7 @@ export default function App() {
         {activePage === "status" && <MyStatus />}
         {activePage === "history" && <MyHistory />}
         {activePage === "employees" && <Employees />}
-        {activePage === "admin" && role === "manager" && <Admin />}
+        {activePage === "admin" && isManager && <Admin />}
       </main>
     </div>
   );

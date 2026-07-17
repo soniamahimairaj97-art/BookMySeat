@@ -5,23 +5,29 @@ import {
   decideApproval,
   deleteHoliday,
   exportExcel,
+  getCapacity,
   getEmployees,
   getHolidays,
   getPendingApprovals,
   getTeams,
+  previewCapacity,
+  setCapacity,
 } from "../api";
+import { useAuth } from "../AuthContext";
 import { useToast } from "../ToastContext";
 import { T } from "../theme";
-import { addDays, fmtLong, fmtShort, isWeekend, key, parseKey, today } from "../dateUtils";
+import { addDays, fmtLong, fmtShort, isWeekend, key, parseKey, today, TODAY_KEY } from "../dateUtils";
 import Instructions from "../components/Instructions";
 
 export default function Admin() {
+  const { session } = useAuth();
   const showToast = useToast();
 
   const [pending, setPending] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [teams, setTeams] = useState([]);
   const [holidays, setHolidays] = useState([]);
+  const [capacity, setCapacityState] = useState(null); // { seat_count, effective_from, history[] }
   const [loading, setLoading] = useState(true);
 
   const [empName, setEmpName] = useState("");
@@ -32,16 +38,23 @@ export default function Admin() {
   const [holDate, setHolDate] = useState("");
   const [holName, setHolName] = useState("");
 
+  const [capSeatCount, setCapSeatCount] = useState("");
+  const [capEffectiveFrom, setCapEffectiveFrom] = useState(TODAY_KEY);
+  const [capConfirm, setCapConfirm] = useState(null); // { seat_count, effective_from, old_count, released }
+  const [capBusy, setCapBusy] = useState(false);
+
   const upcoming = Array.from({ length: 14 }, (_, i) => addDays(today(), i)).filter((d) => !isWeekend(d));
 
   const loadAll = () => {
     setLoading(true);
-    Promise.all([getPendingApprovals(), getEmployees(), getTeams(), getHolidays()])
-      .then(([ap, emps, tms, hols]) => {
+    Promise.all([getPendingApprovals(), getEmployees(), getTeams(), getHolidays(), getCapacity()])
+      .then(([ap, emps, tms, hols, cap]) => {
         setPending(ap);
         setEmployees(emps);
         setTeams(tms);
         setHolidays(hols);
+        setCapacityState(cap);
+        setCapSeatCount(String(cap.seat_count));
       })
       .catch((err) => showToast(err.message, "error"))
       .finally(() => setLoading(false));
@@ -130,13 +143,148 @@ export default function Admin() {
     }
   };
 
+  const applyCapacity = async (seatCount, effectiveFrom) => {
+    setCapBusy(true);
+    try {
+      const result = await setCapacity(seatCount, effectiveFrom);
+      setCapConfirm(null);
+      showToast(
+        result.released > 0
+          ? `Capacity ${result.old_count} → ${result.new_count} from ${fmtShort(parseKey(result.effective_from))} — ${result.released} WFO booking(s) released to WFH.`
+          : result.new_count > result.old_count
+          ? `Capacity ${result.old_count} → ${result.new_count} from ${fmtShort(parseKey(result.effective_from))} — ${result.new_count - result.old_count} more slot(s) per day.`
+          : `Capacity set to ${result.new_count} from ${fmtShort(parseKey(result.effective_from))}.`,
+        "ok"
+      );
+      loadAll();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setCapBusy(false);
+    }
+  };
+
+  const submitCapacity = async () => {
+    const seatCount = parseInt(capSeatCount, 10);
+    const effectiveFrom = capEffectiveFrom || TODAY_KEY;
+    if (!Number.isFinite(seatCount)) return showToast("Enter a seat count.", "error");
+    if (seatCount < 10 || seatCount > 200) return showToast("Seat count must be between 10 and 200.", "error");
+
+    if (capacity && seatCount < capacity.seat_count) {
+      setCapBusy(true);
+      try {
+        const preview = await previewCapacity(seatCount, effectiveFrom);
+        if (preview.released > 0) {
+          setCapConfirm({ seat_count: seatCount, effective_from: effectiveFrom, old_count: preview.old_count, released: preview.released });
+          return;
+        }
+        await applyCapacity(seatCount, effectiveFrom);
+      } catch (err) {
+        showToast(err.message, "error");
+      } finally {
+        setCapBusy(false);
+      }
+      return;
+    }
+
+    applyCapacity(seatCount, effectiveFrom);
+  };
+
   if (loading) return <p className="text-sm" style={{ color: T.inkSoft }}>Loading…</p>;
 
   const activeCount = employees.filter((e) => e.is_active).length;
 
   return (
     <div className="space-y-5">
-      <Instructions role="manager" />
+      <Instructions role={session.role} capacity={capacity?.seat_count} />
+
+      {/* Seat capacity */}
+      <div className="rounded-2xl p-6" style={{ background: T.panel, border: `1px solid ${T.line}` }}>
+        <h3 className="text-sm font-semibold" style={{ color: T.ink }}>Seat capacity</h3>
+        <p className="text-xs mt-1 mb-4" style={{ color: T.inkSoft }}>
+          WFO slots available per day. Current: <b>{capacity?.seat_count}</b> (effective {fmtLong(parseKey(capacity?.effective_from))}). Admin/Manager only.
+        </p>
+        <div className="flex flex-wrap gap-2 items-end">
+          <label className="w-32">
+            <span className="text-[11px] uppercase tracking-wider" style={{ color: T.inkSoft }}>Seat count</span>
+            <input
+              type="number"
+              min={10}
+              max={200}
+              value={capSeatCount}
+              onChange={(e) => setCapSeatCount(e.target.value)}
+              className="w-full mt-1 text-sm rounded-lg px-3 py-2"
+              style={{ border: `1px solid ${T.line}`, color: T.ink }}
+            />
+          </label>
+          <label className="w-44">
+            <span className="text-[11px] uppercase tracking-wider" style={{ color: T.inkSoft }}>Effective from</span>
+            <input
+              type="date"
+              min={TODAY_KEY}
+              value={capEffectiveFrom}
+              onChange={(e) => setCapEffectiveFrom(e.target.value)}
+              className="w-full mt-1 text-sm rounded-lg px-3 py-2"
+              style={{ border: `1px solid ${T.line}`, color: T.ink }}
+            />
+          </label>
+          <button
+            onClick={submitCapacity}
+            disabled={capBusy}
+            className="text-xs font-semibold px-4 py-2.5 rounded-lg"
+            style={{ background: T.ink, color: "#fff", opacity: capBusy ? 0.6 : 1 }}
+          >
+            Apply
+          </button>
+        </div>
+        <p className="text-[10px] mt-3" style={{ color: T.inkSoft }}>
+          Range: 10–200. Effective date can't be in the past. Reducing capacity releases the latest bookers
+          (by booking time) to WFH — earliest bookers keep their slot.
+        </p>
+
+        {capacity?.history?.length > 0 && (
+          <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${T.line}` }}>
+            <div className="text-[11px] font-semibold mb-2" style={{ color: T.inkSoft }}>History</div>
+            <div className="space-y-1">
+              {capacity.history.map((h) => (
+                <div key={h.id} className="text-[11px] flex items-center gap-2" style={{ color: T.inkSoft }}>
+                  <span style={{ color: T.ink }}>{h.seat_count}</span> seats from {fmtShort(parseKey(h.effective_from))}
+                  {h.previous_count != null && <span>· was {h.previous_count}</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {capConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(22,50,79,0.45)" }}>
+          <div className="rounded-2xl p-6 max-w-sm w-full" style={{ background: T.panel }}>
+            <h3 className="text-sm font-semibold" style={{ color: T.ink }}>Confirm capacity reduction</h3>
+            <p className="text-xs mt-2" style={{ color: T.inkSoft }}>
+              Reducing {capConfirm.old_count} → {capConfirm.seat_count} from {fmtShort(parseKey(capConfirm.effective_from))} will
+              release <b>{capConfirm.released}</b> WFO booking(s) (latest bookers first) and convert them to WFH. Continue?
+            </p>
+            <div className="flex gap-2 mt-5">
+              <button
+                onClick={() => setCapConfirm(null)}
+                className="flex-1 px-4 py-2.5 rounded-lg text-xs font-semibold"
+                style={{ background: T.navySoft, color: T.inkSoft }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => applyCapacity(capConfirm.seat_count, capConfirm.effective_from)}
+                disabled={capBusy}
+                className="flex-1 px-4 py-2.5 rounded-lg text-xs font-semibold"
+                style={{ background: T.red, color: "#fff", opacity: capBusy ? 0.6 : 1 }}
+              >
+                Reduce & release {capConfirm.released}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit approvals queue */}
       <div className="rounded-2xl overflow-hidden" style={{ background: T.panel, border: `1px solid ${T.line}` }}>

@@ -65,10 +65,11 @@ def current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_
     return employee
 
 
-def require_role(role: str):
+def require_role(*roles: str):
     def dependency(user: Employee = Depends(current_user)) -> Employee:
-        if user.role != role:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, f"Requires {role} role.")
+        if user.role not in roles:
+            label = "/".join(r.capitalize() for r in roles)
+            raise HTTPException(status.HTTP_403_FORBIDDEN, f"Requires {label} role.")
         return user
 
     return dependency

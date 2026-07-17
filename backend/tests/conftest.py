@@ -85,6 +85,11 @@ def manager(db, team):
     return make_employee(db, team, "Manager", "mgr@test.example.com", role="manager")
 
 
+@pytest.fixture
+def admin(db, team):
+    return make_employee(db, team, "Admin", "admin@test.example.com", role="admin")
+
+
 def login(client, email, password=DEFAULT_PASSWORD):
     resp = client.post("/login", json={"email": email, "password": password})
     assert resp.status_code == 200, resp.text

@@ -6,14 +6,13 @@ from sqlalchemy.orm import Session
 from app.auth import current_user
 from app.database import get_db
 from app.models import DailyBooking, Employee, EditApproval, Holiday
-from app.schemas import BookingIn, BookingOut, DayStatusOut
+from app.routers.capacity import capacity_for
+from app.schemas import BookingIn, BookingOut, BulkBookingIn, BulkBookingOut, DayStatusOut, SkippedDate
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
-CAPACITY = 63
 
-
-def next_free_slot(db: Session, d: date) -> int:
+def next_free_slot(db: Session, d: date, capacity: int) -> int:
     taken = {
         row[0]
         for row in db.query(DailyBooking.slot_number)
@@ -21,10 +20,10 @@ def next_free_slot(db: Session, d: date) -> int:
         .filter(DailyBooking.slot_number.isnot(None))
         .all()
     }
-    for slot in range(1, CAPACITY + 1):
+    for slot in range(1, capacity + 1):
         if slot not in taken:
             return slot
-    raise HTTPException(409, "Show Full — all 63 WFO slots are booked.")
+    raise HTTPException(409, f"Show Full — all {capacity} WFO slots are booked.")
 
 
 def upsert_booking(db: Session, employee_id: int, d: date, status: str, slot: int | None) -> DailyBooking:
@@ -77,16 +76,17 @@ def book(req: BookingIn, user: Employee = Depends(current_user), db: Session = D
         raise HTTPException(409, f"Already marked {req.status} — slot is filled for this date.")
 
     if req.status == "WFO":
-        # Show Full — count inside a transaction (row lock in Postgres) to stop the 64th booking
+        capacity = capacity_for(db, d)
+        # Show Full — count inside a transaction (row lock in Postgres) to stop the (capacity+1)th booking
         wfo = (
             db.query(DailyBooking)
             .filter_by(booking_date=d, status="WFO")
             .with_for_update()
             .count()
         )
-        if wfo >= CAPACITY and (not existing or existing.status != "WFO"):
-            raise HTTPException(409, "Show Full — all 63 WFO slots are booked.")
-        slot = next_free_slot(db, d)  # auto-assign; user never picks
+        if wfo >= capacity and (not existing or existing.status != "WFO"):
+            raise HTTPException(409, f"Show Full — all {capacity} WFO slots are booked.")
+        slot = next_free_slot(db, d, capacity)  # auto-assign; user never picks
     else:
         slot = None  # WFH / Leave need no slot
 
@@ -115,6 +115,7 @@ def day_status(
     holiday = db.query(Holiday).filter_by(holiday_date=booking_date).first()
     wfo_count = db.query(DailyBooking).filter_by(booking_date=booking_date, status="WFO").count()
     mine = db.query(DailyBooking).filter_by(employee_id=user.id, booking_date=booking_date).first()
+    capacity = capacity_for(db, booking_date)
 
     approval = None
     if booking_date < date.today():
@@ -131,8 +132,8 @@ def day_status(
         holiday_name=holiday.name if holiday else None,
         is_past=booking_date < date.today(),
         wfo_count=wfo_count,
-        capacity=CAPACITY,
-        show_full=wfo_count >= CAPACITY,
+        capacity=capacity,
+        show_full=wfo_count >= capacity,
         my_status=mine.status if mine else None,
         my_slot=mine.slot_number if mine else None,
         my_approval_status=approval.status if approval else None,

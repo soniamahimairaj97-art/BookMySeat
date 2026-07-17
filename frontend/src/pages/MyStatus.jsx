@@ -112,7 +112,7 @@ export default function MyStatus() {
 
   return (
     <div className="space-y-5">
-      <Instructions role={session.role} />
+      <Instructions role={session.role} capacity={capacity} />
 
       {/* Date strip */}
       <div className="flex flex-wrap items-center gap-2">

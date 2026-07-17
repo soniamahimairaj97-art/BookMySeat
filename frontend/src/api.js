@@ -91,6 +91,18 @@ export const addHoliday = (holiday_date, name) =>
 export const deleteHoliday = (holiday_date) =>
   api.delete(`/holidays/${holiday_date}`).then((r) => r.data);
 
+// ---- Seat capacity (admin/manager only, except the date-scoped read) ----
+export const getCapacityFor = (date) =>
+  api.get("/config/capacity", { params: { date } }).then((r) => r.data);
+
+export const getCapacity = () => api.get("/config/capacity").then((r) => r.data);
+
+export const previewCapacity = (seat_count, effective_from) =>
+  api.get("/config/capacity/preview", { params: { seat_count, effective_from } }).then((r) => r.data);
+
+export const setCapacity = (seat_count, effective_from) =>
+  api.put("/config/capacity", { seat_count, effective_from }).then((r) => r.data);
+
 // ---- Export ----
 export const exportExcel = (start, end) =>
   api.get("/export", { params: { start, end }, responseType: "blob" }).then((r) => {

@@ -33,7 +33,7 @@ class Employee(Base):
     email = Column(String, nullable=False, unique=True, index=True)
     team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    role = Column(String, nullable=False, default="employee")  # "employee" | "manager"
+    role = Column(String, nullable=False, default="employee")  # "employee" | "manager" | "admin"
     hashed_password = Column(String, nullable=False)
 
     team = relationship("Team", back_populates="employees")
@@ -77,3 +77,17 @@ class Holiday(Base):
     holiday_date = Column(Date, nullable=False, unique=True)
     name = Column(String, nullable=False)
     created_by = Column(Integer, ForeignKey("employees.id"), nullable=True)
+
+
+class FloorConfig(Base):
+    """WFO seat capacity, effective from a given date onward. Current capacity for
+    date d = seat_count of the latest row where effective_from <= d."""
+
+    __tablename__ = "floor_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    seat_count = Column(Integer, nullable=False)
+    effective_from = Column(Date, nullable=False, index=True)
+    previous_count = Column(Integer, nullable=True)
+    updated_by = Column(Integer, ForeignKey("employees.id"), nullable=True)
+    updated_on = Column(DateTime, default=datetime.utcnow, nullable=False)

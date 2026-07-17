@@ -5,7 +5,6 @@ export const T = {
   gold: "#C9A227", blue: "#3D5A76", blueSoft: "#E7EDF4",
 };
 
-export const CAPACITY = 63;
 export const BOOKING_WINDOW = 7;
 
 export const STATUS = {

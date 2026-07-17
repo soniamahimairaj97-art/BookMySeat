@@ -52,7 +52,7 @@ def my_approvals(
 
 @router.get("/pending", response_model=list[ApprovalOut])
 def list_pending(
-    manager: Employee = Depends(require_role("manager")),
+    manager: Employee = Depends(require_role("admin", "manager")),
     db: Session = Depends(get_db),
 ):
     return db.query(EditApproval).filter_by(status="Pending").all()
@@ -62,7 +62,7 @@ def list_pending(
 def decide(
     approval_id: int,
     req: ApprovalDecisionIn,
-    manager: Employee = Depends(require_role("manager")),
+    manager: Employee = Depends(require_role("admin", "manager")),
     db: Session = Depends(get_db),
 ):
     approval = db.query(EditApproval).filter_by(id=approval_id).first()
