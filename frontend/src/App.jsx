@@ -42,7 +42,9 @@ export default function App() {
 
   const capacityLabel = capacity ?? "…";
   const titles = {
-    dashboard: ["Dashboard — split view", "Team-wise WFO · WFH · Leave (A) · Absent counts, live"],
+    dashboard: isManager
+      ? ["Dashboard — team split", "Team-wise WFO · WFH · Leave (A) · Absent counts, by day/week/month"]
+      : ["My dashboard", "Your own WFO · WFH · Leave (A) · Absent counts, by week/month"],
     status: ["My status", `WFO / WFH / Leave (A) · ${capacityLabel} WFO slots · auto-assigned · Mon–Fri, 7-day window`],
     history: ["My history", "Your daily categories and edit rules"],
     employees: ["Employees", "People on record"],

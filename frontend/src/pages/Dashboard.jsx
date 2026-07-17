@@ -1,60 +1,50 @@
 import { useEffect, useState } from "react";
-import { getDashboard, getHolidays } from "../api";
+import { getMyDashboard, getTeamDashboard } from "../api";
+import { useAuth } from "../AuthContext";
 import { useToast } from "../ToastContext";
 import { T, STATUS } from "../theme";
-import { addDays, fmtLong, fmtShort, isWeekend, key, today } from "../dateUtils";
+import { fmtLong, fmtShort, key, parseKey, today } from "../dateUtils";
 import Stat from "../components/Stat";
 import CapacityRing from "../components/CapacityRing";
+import StatusChip from "../components/StatusChip";
 
 const TEAM_COLORS = { PFG: "#16324F", Gear_Box: "#0E8A6A", e_Motor: "#B87400" };
 const teamColor = (name) => TEAM_COLORS[name] || T.inkSoft;
 
-export default function Dashboard() {
-  const showToast = useToast();
-  const [dayOffset, setDayOffset] = useState(0);
-  const [holidays, setHolidays] = useState([]);
-  const [data, setData] = useState(null);
-  const [trend, setTrend] = useState([]);
-  const [loading, setLoading] = useState(true);
+const VIEW_LABELS = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
 
-  const d = addDays(today(), dayOffset);
-  const k = key(d);
-  const closed = isWeekend(d) || holidays.some((h) => h.holiday_date === k);
+function ViewAndDatePicker({ views, view, setView, selectedDate, setSelectedDate, rangeLabel }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {views.map((v) => (
+        <button
+          key={v}
+          onClick={() => setView(v)}
+          className="px-3.5 py-2 rounded-xl text-xs font-medium"
+          style={{
+            background: v === view ? T.ink : T.panel,
+            color: v === view ? "#fff" : T.inkSoft,
+            border: `1px solid ${v === view ? T.ink : T.line}`,
+          }}
+        >
+          {VIEW_LABELS[v]}
+        </button>
+      ))}
+      <input
+        type="date"
+        value={key(selectedDate)}
+        onChange={(e) => setSelectedDate(parseKey(e.target.value))}
+        className="px-3 py-2 rounded-xl text-xs font-medium"
+        style={{ border: `1px solid ${T.line}`, color: T.ink, background: T.panel }}
+      />
+      <span className="text-xs ml-1" style={{ color: T.inkSoft }}>{rangeLabel}</span>
+    </div>
+  );
+}
 
-  useEffect(() => {
-    getHolidays()
-      .then(setHolidays)
-      .catch((err) => showToast(err.message, "error"));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    setLoading(true);
-    getDashboard(k)
-      .then(setData)
-      .catch((err) => showToast(err.message, "error"))
-      .finally(() => setLoading(false));
-  }, [k]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const days = Array.from({ length: 8 }, (_, i) => addDays(today(), i));
-    Promise.all(
-      days.map((dd) => {
-        const kk = key(dd);
-        const off = isWeekend(dd) || holidays.some((h) => h.holiday_date === kk);
-        if (off) return Promise.resolve({ d: dd, closed: true, count: 0 });
-        return getDashboard(kk).then((res) => ({ d: dd, closed: false, count: res.totals.wfo }));
-      })
-    )
-      .then(setTrend)
-      .catch((err) => showToast(err.message, "error"));
-  }, [holidays]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (loading && !data) {
-    return <p className="text-sm" style={{ color: T.inkSoft }}>Loading dashboard…</p>;
-  }
-  if (!data) return null;
-
-  const { teams: per, totals: total, capacity, show_full: full } = data;
+function ManagerDashboard({ data, view, setView, selectedDate, setSelectedDate }) {
+  const { teams: per, totals: total, capacity, show_full: full, avg_wfo_utilization, days, working_days, start, end } = data;
+  const isDaily = view === "daily";
 
   const seg = (t) => [
     { code: "WFO", v: t.wfo, color: STATUS.WFO.color },
@@ -63,88 +53,88 @@ export default function Dashboard() {
     { code: "A", v: t.absent, color: "#B0BCC8" },
   ];
 
+  const rangeLabel = isDaily ? fmtLong(parseKey(start)) : `${fmtShort(parseKey(start))} – ${fmtShort(parseKey(end))} · ${working_days} working days`;
+
   return (
     <div className="space-y-5">
-      {/* Date scope */}
-      <div className="flex flex-wrap items-center gap-2">
-        {[0, 1, 2].map((o) => {
-          const dd = addDays(today(), o);
-          return (
-            <button
-              key={o}
-              onClick={() => setDayOffset(o)}
-              className="px-3.5 py-2 rounded-xl text-xs font-medium"
-              style={{
-                background: o === dayOffset ? T.ink : T.panel,
-                color: o === dayOffset ? "#fff" : T.inkSoft,
-                border: `1px solid ${o === dayOffset ? T.ink : T.line}`,
-              }}
-            >
-              {o === 0 ? "Today" : fmtShort(dd)}
-            </button>
-          );
-        })}
-        <span className="text-xs ml-1" style={{ color: T.inkSoft }}>
-          {fmtLong(d)}
-          {closed ? " · office closed" : ""}
-        </span>
-      </div>
+      <ViewAndDatePicker
+        views={["daily", "weekly", "monthly"]}
+        view={view}
+        setView={setView}
+        selectedDate={selectedDate}
+        setSelectedDate={setSelectedDate}
+        rangeLabel={rangeLabel}
+      />
 
-      {/* Overall split */}
       <div className="flex flex-wrap gap-4">
         <Stat
-          label="WFO (slots filled)"
-          value={`${total.wfo}/${capacity}`}
-          sub={full ? "Show Full — WFO booking blocked" : `${capacity - total.wfo} slots remaining`}
-          accent={full ? T.red : STATUS.WFO.color}
+          label={isDaily ? "WFO (slots filled)" : "WFO (person-days)"}
+          value={isDaily ? `${total.wfo}/${capacity}` : total.wfo}
+          sub={isDaily ? (full ? "Show Full — WFO booking blocked" : `${capacity - total.wfo} slots remaining`) : `across ${working_days} working days`}
+          accent={isDaily && full ? T.red : STATUS.WFO.color}
         />
-        <Stat label="WFH" value={total.wfh} sub="Working from home" accent={STATUS.WFH.color} />
-        <Stat label="Leave (A)" value={total.leave} sub="Planned leave" accent={STATUS.L.color} />
+        <Stat label="WFH" value={total.wfh} sub={isDaily ? "Working from home" : "person-days"} accent={STATUS.WFH.color} />
+        <Stat label="Leave (A)" value={total.leave} sub={isDaily ? "Planned leave" : "person-days"} accent={STATUS.L.color} />
         <Stat
           label="Absent / not marked"
           value={total.absent}
-          sub={`of ${total.headcount} active employees`}
+          sub={`of ${total.headcount} active employees${isDaily ? "" : " × working days"}`}
           accent="#8A98A6"
         />
+        {!isDaily && (
+          <Stat
+            label="Avg WFO utilization"
+            value={`${Math.round((avg_wfo_utilization ?? 0) * 100)}%`}
+            sub="vs capacity, averaged per working day"
+            accent={STATUS.WFO.color}
+          />
+        )}
       </div>
 
       <div className="flex flex-wrap gap-5">
-        <div className="rounded-2xl p-6 flex-1 min-w-[300px]" style={{ background: T.panel, border: `1px solid ${T.line}` }}>
-          <h3 className="text-sm font-semibold mb-4" style={{ color: T.ink }}>WFO slot utilization</h3>
-          <CapacityRing occupied={total.wfo} capacity={capacity} />
-        </div>
+        {isDaily && (
+          <div className="rounded-2xl p-6 flex-1 min-w-[300px]" style={{ background: T.panel, border: `1px solid ${T.line}` }}>
+            <h3 className="text-sm font-semibold mb-4" style={{ color: T.ink }}>WFO slot utilization</h3>
+            <CapacityRing occupied={total.wfo} capacity={capacity} />
+          </div>
+        )}
 
         <div className="rounded-2xl p-6 flex-[1.6] min-w-[340px]" style={{ background: T.panel, border: `1px solid ${T.line}` }}>
-          <h3 className="text-sm font-semibold mb-1" style={{ color: T.ink }}>Team-wise split — WFO · WFH · Leave · Absent</h3>
+          <h3 className="text-sm font-semibold mb-1" style={{ color: T.ink }}>
+            Team-wise split — WFO · WFH · Leave · Absent{isDaily ? "" : " (period totals)"}
+          </h3>
           <p className="text-[11px] mb-4" style={{ color: T.inkSoft }}>
-            Headcount: {per.map((t) => `${t.name} ${t.headcount}`).join(" · ")} ({total.headcount} active, {capacity} WFO slots).
+            Headcount: {per.map((t) => `${t.name} ${t.headcount}`).join(" · ")} ({total.headcount} active{isDaily ? `, ${capacity} WFO slots` : ""}).
           </p>
           <div className="space-y-4">
-            {per.map((t) => (
-              <div key={t.name}>
-                <div className="flex justify-between text-xs mb-1.5">
-                  <span className="font-medium flex items-center gap-1.5" style={{ color: T.ink }}>
-                    <i className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: teamColor(t.name) }} />
-                    {t.name}
-                  </span>
-                  <span style={{ color: T.inkSoft }}>
-                    WFO {t.wfo} · WFH {t.wfh} · Leave {t.leave} · Absent {t.absent} · {t.headcount} members
-                  </span>
+            {per.map((t) => {
+              const denom = isDaily ? t.headcount : t.wfo + t.wfh + t.leave + t.absent || 1;
+              return (
+                <div key={t.name}>
+                  <div className="flex justify-between text-xs mb-1.5">
+                    <span className="font-medium flex items-center gap-1.5" style={{ color: T.ink }}>
+                      <i className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: teamColor(t.name) }} />
+                      {t.name}
+                    </span>
+                    <span style={{ color: T.inkSoft }}>
+                      WFO {t.wfo} · WFH {t.wfh} · Leave {t.leave} · Absent {t.absent} · {t.headcount} members
+                    </span>
+                  </div>
+                  <div className="h-3 rounded-full overflow-hidden flex" style={{ background: T.navySoft }}>
+                    {seg(t).map(
+                      (s) =>
+                        s.v > 0 && (
+                          <div
+                            key={s.code}
+                            title={`${s.code}: ${s.v}`}
+                            style={{ width: `${(s.v / denom) * 100}%`, background: s.color, transition: "width 500ms ease" }}
+                          />
+                        )
+                    )}
+                  </div>
                 </div>
-                <div className="h-3 rounded-full overflow-hidden flex" style={{ background: T.navySoft }}>
-                  {seg(t).map(
-                    (s) =>
-                      s.v > 0 && (
-                        <div
-                          key={s.code}
-                          title={`${s.code}: ${s.v}`}
-                          style={{ width: `${(s.v / t.headcount) * 100}%`, background: s.color, transition: "width 500ms ease" }}
-                        />
-                      )
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div className="flex flex-wrap gap-4 mt-4 text-[11px]" style={{ color: T.inkSoft }}>
             <span className="flex items-center gap-1.5"><i className="inline-block w-3 h-3 rounded" style={{ background: STATUS.WFO.color }} /> WFO</span>
@@ -158,7 +148,7 @@ export default function Dashboard() {
       <div className="flex flex-wrap gap-5">
         <div className="rounded-2xl overflow-hidden flex-1 min-w-[320px]" style={{ background: T.panel, border: `1px solid ${T.line}` }}>
           <div className="px-5 py-3.5 text-sm font-semibold" style={{ color: T.ink, borderBottom: `1px solid ${T.line}` }}>
-            Split table — {fmtShort(d)}
+            Split table — {isDaily ? fmtShort(parseKey(start)) : VIEW_LABELS[view]}
           </div>
           <table className="w-full text-xs">
             <thead>
@@ -191,27 +181,131 @@ export default function Dashboard() {
           </table>
         </div>
 
-        <div className="rounded-2xl p-6 flex-1 min-w-[320px]" style={{ background: T.panel, border: `1px solid ${T.line}` }}>
-          <h3 className="text-sm font-semibold mb-1" style={{ color: T.ink }}>WFO booking trend — next 8 days</h3>
-          <p className="text-[11px] mb-4" style={{ color: T.inkSoft }}>Slots filled per day vs the {capacity} capacity.</p>
-          <div className="flex items-end gap-2 h-32">
-            {trend.map((t) => (
-              <div key={key(t.d)} className="flex-1 flex flex-col items-center gap-1">
-                <span className="text-[10px] font-semibold" style={{ color: t.closed ? "#B0BCC8" : T.ink }}>{t.closed ? "—" : t.count}</span>
-                <div
-                  className="w-full rounded-t-md"
-                  style={{
-                    height: `${t.closed ? 4 : Math.max((t.count / capacity) * 100, 4)}%`,
-                    background: t.closed ? T.line : t.count >= capacity ? T.red : t.count / capacity > 0.7 ? T.amber : T.green,
-                    transition: "height 400ms ease",
-                  }}
-                />
-                <span className="text-[9px]" style={{ color: T.inkSoft }}>{t.d.toLocaleDateString("en-IN", { weekday: "short" })}</span>
-              </div>
-            ))}
+        {!isDaily && (
+          <div className="rounded-2xl p-6 flex-1 min-w-[320px]" style={{ background: T.panel, border: `1px solid ${T.line}` }}>
+            <h3 className="text-sm font-semibold mb-1" style={{ color: T.ink }}>WFO booking trend — {VIEW_LABELS[view].toLowerCase()} view</h3>
+            <p className="text-[11px] mb-4" style={{ color: T.inkSoft }}>Slots filled per working day vs capacity that day.</p>
+            <div className="flex items-end gap-2 h-32 overflow-x-auto">
+              {days.map((d) => {
+                const dd = parseKey(d.date);
+                const cap = d.capacity || 1;
+                return (
+                  <div key={d.date} className="flex-1 flex flex-col items-center gap-1 min-w-[24px]">
+                    <span className="text-[10px] font-semibold" style={{ color: d.is_working_day ? T.ink : "#B0BCC8" }}>
+                      {d.is_working_day ? d.wfo_count : "—"}
+                    </span>
+                    <div
+                      className="w-full rounded-t-md"
+                      style={{
+                        height: `${d.is_working_day ? Math.max((d.wfo_count / cap) * 100, 4) : 4}%`,
+                        background: !d.is_working_day ? T.line : d.show_full ? T.red : d.wfo_count / cap > 0.7 ? T.amber : T.green,
+                        transition: "height 400ms ease",
+                      }}
+                    />
+                    <span className="text-[9px]" style={{ color: T.inkSoft }}>{dd.toLocaleDateString("en-IN", { weekday: "short", day: "numeric" })}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function EmployeeDashboard({ data, view, setView, selectedDate, setSelectedDate }) {
+  const { totals, days, start, end } = data;
+  const selectedDay = days.find((d) => d.date === key(selectedDate));
+  const rangeLabel = `${fmtShort(parseKey(start))} – ${fmtShort(parseKey(end))} · ${totals.working_days} working days`;
+
+  return (
+    <div className="space-y-5">
+      <ViewAndDatePicker
+        views={["weekly", "monthly"]}
+        view={view}
+        setView={setView}
+        selectedDate={selectedDate}
+        setSelectedDate={setSelectedDate}
+        rangeLabel={rangeLabel}
+      />
+
+      <div className="flex flex-wrap gap-4">
+        <Stat label="WFO" value={totals.wfo} sub={`of ${totals.working_days} working days`} accent={STATUS.WFO.color} />
+        <Stat label="WFH" value={totals.wfh} sub="Working from home" accent={STATUS.WFH.color} />
+        <Stat label="Leave (A)" value={totals.leave} sub="Planned leave" accent={STATUS.L.color} />
+        <Stat label="Absent / not marked" value={totals.absent} sub="days without an entry" accent="#8A98A6" />
+      </div>
+
+      {selectedDay?.is_working_day && (
+        <div className="rounded-2xl px-5 py-3.5 text-xs flex items-center gap-2" style={{ background: T.panel, border: `1px solid ${T.line}`, color: T.inkSoft }}>
+          <span className="text-sm font-semibold" style={{ color: selectedDay.show_full ? T.red : T.ink }}>
+            WFO slots on {fmtShort(parseKey(selectedDay.date))}: {selectedDay.wfo_count}/{selectedDay.capacity} filled
+          </span>
+          {selectedDay.show_full && <span className="font-semibold" style={{ color: T.red }}>· Show Full</span>}
+        </div>
+      )}
+
+      <div className="rounded-2xl overflow-hidden" style={{ background: T.panel, border: `1px solid ${T.line}` }}>
+        <div className="px-5 py-3.5 text-sm font-semibold" style={{ color: T.ink, borderBottom: `1px solid ${T.line}` }}>
+          My entries — {VIEW_LABELS[view]}
+        </div>
+        <table className="w-full text-xs">
+          <thead>
+            <tr style={{ color: T.inkSoft }}>
+              {["Date", "Day", "My status"].map((h) => (
+                <th key={h} className="text-left px-4 py-2.5 font-medium" style={{ borderBottom: `1px solid ${T.line}` }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {days.map((d) => (
+              <tr key={d.date} style={{ color: T.ink }}>
+                <td className="px-4 py-2.5 font-medium" style={{ borderBottom: `1px solid ${T.line}` }}>{fmtShort(parseKey(d.date))}</td>
+                <td className="px-4 py-2.5" style={{ borderBottom: `1px solid ${T.line}`, color: T.inkSoft }}>
+                  {d.is_weekend ? "Weekend" : d.is_holiday ? `Holiday — ${d.holiday_name}` : "Working day"}
+                </td>
+                <td className="px-4 py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+                  {d.is_working_day ? <StatusChip code={d.status} /> : <span style={{ color: "#B0BCC8" }}>—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export default function Dashboard() {
+  const { session } = useAuth();
+  const showToast = useToast();
+  const isManager = session.role === "manager" || session.role === "admin";
+
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [view, setView] = useState(isManager ? "daily" : "weekly");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const dateKey = key(selectedDate);
+
+  useEffect(() => {
+    setLoading(true);
+    const fetcher = isManager ? getTeamDashboard : getMyDashboard;
+    fetcher(view, dateKey)
+      .then(setData)
+      .catch((err) => showToast(err.message, "error"))
+      .finally(() => setLoading(false));
+  }, [view, dateKey, isManager]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading && !data) {
+    return <p className="text-sm" style={{ color: T.inkSoft }}>Loading dashboard…</p>;
+  }
+  if (!data) return null;
+
+  return isManager ? (
+    <ManagerDashboard data={data} view={view} setView={setView} selectedDate={selectedDate} setSelectedDate={setSelectedDate} />
+  ) : (
+    <EmployeeDashboard data={data} view={view} setView={setView} selectedDate={selectedDate} setSelectedDate={setSelectedDate} />
   );
 }

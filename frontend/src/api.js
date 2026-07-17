@@ -58,9 +58,6 @@ export const getMyDashboard = (view, date) =>
 export const getTeamDashboard = (view, date) =>
   api.get("/dashboard/team", { params: { view, date } }).then((r) => r.data);
 
-export const getDashboard = (date) =>
-  api.get("/dashboard", { params: { date } }).then((r) => r.data);
-
 // ---- Bookings ----
 export const bookStatus = (booking_date, status) =>
   api.post("/bookings", { booking_date, status }).then((r) => r.data);
