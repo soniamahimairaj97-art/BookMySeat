@@ -102,7 +102,15 @@ def export_excel(
     if end < start:
         raise HTTPException(400, "end date must not be before start date.")
 
-    days = [start + timedelta(n) for n in range((end - start).days + 1)]
+    holidays = {
+        h.holiday_date
+        for h in db.query(Holiday).filter(Holiday.holiday_date.between(start, end)).all()
+    }
+    working_days = [
+        start + timedelta(n)
+        for n in range((end - start).days + 1)
+        if (start + timedelta(n)).weekday() < 5 and (start + timedelta(n)) not in holidays
+    ]
 
     employees = db.query(Employee).filter_by(is_active=True).order_by(Employee.team_id, Employee.name).all()
     bookings = db.query(DailyBooking).filter(
@@ -111,28 +119,71 @@ def export_excel(
     booking_map = {(b.employee_id, b.booking_date): b.status for b in bookings}
     teams = {t.id: t.label for t in db.query(Team).all()}
 
+    teams_with_members: dict[str, list] = {}
+    for emp in employees:
+        teams_with_members.setdefault(teams.get(emp.team_id, ""), []).append(emp)
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Attendance"
-    ws.append(["Employee", "Team"] + [d.isoformat() for d in days])
 
-    team_totals: dict[str, dict[str, int]] = {}
+    total_cols = ["WFO total", "WFH total", "L total", "A total"]
+    emp_col_start = 2  # column B — column A is BookingDate
+
+    # Row 1: team header (merged over each team's employee columns) + "Day Totals" header
+    ws.cell(row=1, column=1, value="BookingDate")
+    col = emp_col_start
+    for team_label, members in teams_with_members.items():
+        ws.cell(row=1, column=col, value=team_label)
+        if len(members) > 1:
+            ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col + len(members) - 1)
+        col += len(members)
+    day_totals_start = col
+    ws.cell(row=1, column=day_totals_start, value="Day Totals")
+    ws.merge_cells(start_row=1, start_column=day_totals_start, end_row=1, end_column=day_totals_start + 3)
+    ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=1)
+
+    # Row 2: employee names + per-day total column labels
+    col = emp_col_start
     for emp in employees:
-        row = [emp.name, teams.get(emp.team_id, "")]
-        team_label = teams.get(emp.team_id, "")
-        team_totals.setdefault(team_label, {"WFO": 0, "WFH": 0, "L": 0, "A": 0})
-        for d in days:
-            if d.weekday() >= 5:
-                row.append("")
-                continue
+        ws.cell(row=2, column=col, value=emp.name)
+        col += 1
+    for offset, label in enumerate(total_cols):
+        ws.cell(row=2, column=day_totals_start + offset, value=label)
+
+    # Data rows — one per working day (Y axis), one column per employee (X axis)
+    per_employee_totals: dict[int, dict[str, int]] = {emp.id: {"WFO": 0, "WFH": 0, "L": 0, "A": 0} for emp in employees}
+    row_num = 3
+    for d in working_days:
+        row = [d.isoformat()]
+        day_counts = {"WFO": 0, "WFH": 0, "L": 0, "A": 0}
+        for emp in employees:
             status = booking_map.get((emp.id, d), "A")
             row.append(status)
-            team_totals[team_label][status] = team_totals[team_label].get(status, 0) + 1
+            day_counts[status] = day_counts.get(status, 0) + 1
+            per_employee_totals[emp.id][status] += 1
+        row += [day_counts["WFO"], day_counts["WFH"], day_counts["L"], day_counts["A"]]
         ws.append(row)
+        row_num += 1
+
+    # Footer block — per-employee totals under each column (replaces old per-employee total columns)
+    for status in ("WFO", "WFH", "L", "A"):
+        ws.cell(row=row_num, column=1, value=f"TOTAL — {status}")
+        col = emp_col_start
+        for emp in employees:
+            ws.cell(row=row_num, column=col, value=per_employee_totals[emp.id][status])
+            col += 1
+        row_num += 1
+
+    ws.freeze_panes = "B3"
 
     totals_ws = wb.create_sheet("Team Totals")
     totals_ws.append(["Team", "WFO", "WFH", "L", "A"])
-    for team_label, counts in team_totals.items():
+    for team_label, members in teams_with_members.items():
+        counts = {"WFO": 0, "WFH": 0, "L": 0, "A": 0}
+        for emp in members:
+            for status in counts:
+                counts[status] += per_employee_totals[emp.id][status]
         totals_ws.append([team_label, counts["WFO"], counts["WFH"], counts["L"], counts["A"]])
 
     buffer = BytesIO()
